@@ -2,6 +2,28 @@
 
 DevFlow AI 是一个面向 GitHub PR / Issue 研发协作的全栈 AI Agent 项目。系统会连接仓库数据，分析 Issue、PR diff、CI 日志、项目知识库和本地工作区代码，并返回结构化建议与安全的操作草稿。
 
+## 项目截图
+
+以下截图来自本地实际运行的应用，使用 `course-demo/devflow-sample-api` 演示数据。页面用于展示交互和功能入口，不代表生产环境验证或评测成绩。
+
+### 研发协作工作台
+
+集中查看 Issue、PR 与 CI 状态，在同一工作台发起 Agent 对话。
+
+![DevFlow AI 研发协作工作台](docs/screenshots/workspace.jpg)
+
+### PR 审查与协作
+
+查看 PR 变更、Review 评论与审查建议，结合 Agent 对话定位研发问题。
+
+![DevFlow AI PR 审查与协作面板](docs/screenshots/pr-review.jpg)
+
+### RAG 知识库
+
+按仓库管理文档、分段、检索策略和模型配置。
+
+![DevFlow AI RAG 知识库](docs/screenshots/knowledge-base.jpg)
+
 ## 核心能力
 
 - 连接并同步 GitHub 仓库中的 Issue、Pull Request、PR 文件、Review 评论、Workflow Run、Job 和日志。
@@ -19,8 +41,8 @@ DevFlow AI 是一个面向 GitHub PR / Issue 研发协作的全栈 AI Agent 项�
 ## 技术栈
 
 - 后端：Python、FastAPI、Pydantic、SQLAlchemy、PostgreSQL、Milvus、httpx、LangChain。
-- Agent 编排：原生工具调用 + 专用分析 Agent。
-- 前端：Next.js、TypeScript、Tailwind CSS、React Query。
+- Agent 编排：LangGraph 工具调用循环 + 专用分析 Agent + DAG 工作流。
+- 前端：Next.js 15、React 19、TypeScript、Tailwind CSS、SSE 流式响应。
 - 基础设施：Docker Compose 与 `.env` 配置。
 
 ## 架构
@@ -49,6 +71,15 @@ flowchart TD
 
 ## 快速开始
 
+需要 Python 3.11+、Node.js 20+ 和已启动的 Docker Desktop。先克隆仓库：
+
+```bash
+git clone https://github.com/zlm3243522923/DevFlow-AI.git
+cd DevFlow-AI
+```
+
+复制配置后，在 `.env` 中按需填写 `GITHUB_TOKEN`、`LLM_API_KEY` 和 Embedding 配置；真实密钥只保存在本地，不要提交到 Git。
+
 ```bash
 cp .env.example .env
 docker compose up -d postgres etcd minio milvus
@@ -76,7 +107,7 @@ npm run dev
 
 ## RAG 知识问答系统
 
-项目内置了与第 7.1 节流程一一对应的完整 RAG 系统：知识库创建向导、文档解析、段落感知切片、Embedding、向量/关键词混合检索、重排、召回测试、问答工作室、上下文组装、基于证据生成和编号引用。支持 TXT、Markdown、PDF、DOCX、JSON、CSV 与日志文件；重复文件会按 SHA-256 跳过。
+项目内置 RAG 知识问答流程：仓库知识库管理、文档解析、段落感知切片、Embedding、向量/关键词混合检索、重排、召回测试、问答工作室、上下文组装、基于证据生成和编号引用。支持 TXT、Markdown、PDF、DOCX、JSON、CSV 与日志文件；重复文件会按 SHA-256 跳过。
 
 对话链路采用混合 RAG：`ContextAssembler` 会在调用 ChatAgent 前按原始问题检索并注入证据；进入推理循环后，模型仍可把 `rag.search_similar_documents` 当作工具，改写查询、连续补查不同资料，并根据多次工具结果交叉验证答案。
 
@@ -97,11 +128,11 @@ npm run dev
 RAG API：
 
 ```text
-POST /api/rag/knowledge-bases
-GET  /api/rag/knowledge-bases
-GET  /api/rag/knowledge-bases/{repo_id}
-POST /api/rag/knowledge-bases/{repo_id}/documents
-POST /api/rag/knowledge-bases/{repo_id}/retrieval-tests
+GET  /api/rag/repositories
+GET  /api/rag/repositories/{repo_id}
+PATCH /api/rag/repositories/{repo_id}/config
+POST /api/rag/repositories/{repo_id}/documents
+POST /api/rag/repositories/{repo_id}/retrieval-tests
 GET  /api/rag/{repo_id}/status
 POST /api/rag/{repo_id}/search
 POST /api/rag/{repo_id}/ask
@@ -112,7 +143,7 @@ POST /api/rag/{repo_id}/reindex
 
 启动主应用后打开 `http://127.0.0.1:3000/evals`，选择仓库、固定评测集和 Top-K，再点击“运行固定 RAGAS 评测”。评测会在隔离会话中真实运行生产 ChatAgent 和工具集，收集预检索与 Agent 二次检索证据，然后使用 Ragas 0.4 Collections API 计算 Context Precision、Context Recall、Faithfulness、Answer Relevancy 和 Agent Goal Accuracy。结果会保存评测集 Hash、阈值、逐题工具轨迹、检索证据、硬规则与失败诊断，便于对同一基线做回归。
 
-默认 Judge 复用 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`；也可以通过 `.env` 中的 `RAGAS_JUDGE_API_KEY`、`RAGAS_JUDGE_BASE_URL`、`RAGAS_JUDGE_MODEL` 单独配置。主项目内置的正式基准位于 `docs/datas/evals/rag_cases.json`，启动时会检查用例引用的文档是否已进入当前仓库知识库：
+默认 Judge 复用 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`；也可以通过 `.env` 中的 `RAGAS_JUDGE_API_KEY`、`RAGAS_JUDGE_BASE_URL`、`RAGAS_JUDGE_MODEL` 单独配置。当前仓库提供 `auto-document-smoke` 自动文档冒烟评测；它用于检查链路，不等同于人工标注的固定质量基准。人工维护的固定评测集可以放入 `docs/datas/evals/*.json`，系统会校验其中引用的文档是否已进入当前仓库知识库。运行示例：
 
 ```http
 POST /api/evals/rag/run
@@ -122,7 +153,7 @@ Content-Type: application/json
   "repo_id": "<repository-uuid>",
   "run_judge": true,
   "top_k": 5,
-  "suite_id": "devflow-real-project-rag-baseline"
+  "suite_id": "auto-document-smoke"
 }
 ```
 
